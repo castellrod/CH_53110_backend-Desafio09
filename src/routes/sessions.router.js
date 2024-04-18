@@ -1,88 +1,77 @@
 const Router = require('express').Router;
-const UsuariosManager = require('../managers/UsuariosManager.js');
-const { creaHash } = require('../utils.js');
+const { session } = require('passport');
+const UserManager = require('../managers/userManager');
+const sessionRouter = Router();
+const passport = require('passport');
+let userManager = new UserManager();
 
-const  usersRouter= Router();
 
-let usuariosManager=new UsuariosManager()
 
-usersRouter.post('/registro',async(req,res)=>{
-
-    let {first_name,last_name, age, email, password} =req.body
-    if(!first_name || !last_name || !age || !email || !password){
-        return res.redirect("/registro?error=Faltan datos")
-    }
-
-    let existe=await usuariosManager.getBy({email})
-    if(existe){
-        return res.redirect(`/registro?error=Ya existen usuarios con email ${email}`)
-
-    }
-    password=creaHash(password)
-
+sessionRouter.get('/', async (req, res) => {
     try {
-        let nuevoUsuario=await usuariosManager.create({first_name, last_name, age, email, password})
-
-
-        return res.redirect(`/registro?mensaje=Registro exitoso para ${first_name}`)
-
+        const users = await userManager.getUsers();
+        res.json(users);
     } catch (error) {
-        return res.redirect(`/registro?error=Error 500 - error inesperado`)
-        
+        res.status(500).json({ error: error.message });
     }
+});
 
 
-})
+sessionRouter.get("/registerError", (req, res) => {
+    res.redirect("/register?message=Error en registro");
+    });
 
-usersRouter.post('/login',async(req,res)=>{
-
-    let {email, password} =req.body
-    if(!email || !password){
-        res.setHeader('Content-Type','application/json');
-        return res.status(400).json({error:`Faltan datos`})
+    sessionRouter.post(
+    "/register",
+    passport.authenticate("register", {
+        failureRedirect: "/api/sessions/registerError",
+    }),
+    async (req, res) => {
+    return res.redirect("/register?message=¡Registro correcto!");
     }
+);
 
-    let usuario=await usuariosManager.getBy({email})
-    if(!usuario){
-        res.setHeader('Content-Type','application/json');
-        return res.status(401).json({error:`Credenciales incorrectas`})
-    }
+    sessionRouter.get("/loginError", (req, res) => {
+    res.redirect("/login?error=Error en login");
+    });
 
-    if(usuario.password!==creaHash(password)){
-        res.setHeader('Content-Type','application/json');
-        return res.status(401).json({error:`Credenciales incorrectas`})
-    }
+    sessionRouter.post("/login", passport.authenticate("login", {failureRedirect: "/api/sessions/loginError",}), (req, res) => {
+    let user=req.user
+    user={...user}
+    delete user.password
+    req.session.user =user 
 
-    usuario={...usuario}
-    delete usuario.password
-    req.session.usuario=usuario
+    res.redirect("/products");
+});
 
-    res.setHeader('Content-Type','application/json')
-    res.status(200).json({
-        message:"Login correcto", usuario
+    sessionRouter.get("/github", passport.authenticate("githubLogin", {}), (req, res)=>{
+
+});
+
+    sessionRouter.get("/githubError", (req, res) => {
+    res.setHeader("Content-Type", "application/json");
+    return res.status(500).json({
+    error: "Error en servidor",
+    detalle: "Error en login con Github"
     })
-})
+});
 
+    sessionRouter.get("/githubCallback", passport.authenticate("githubLogin", {failureRedirect:"api/sessions/githubError"}), (req, res) => {
+    req.session.user = req.user;
+    res.setHeader("Content-Type", "application/json");
+    return res.status(200).json({payload: "Login successful", user: req.user});
+});
 
-usersRouter.get('/logout',(req,res)=>{
-
-    req.session.destroy(e=>{
-        if(e){
-            res.setHeader('Content-Type','application/json');
-            return res.status(500).json(
-                {
-                    error:`Error inesperado en el servidor - Intente más tarde, o contacte a su administrador`,
-                    detalle:`${e.message}`
-                }
-            )
-            
+sessionRouter.get('/logout', async (req, res) => {
+    req.session.destroy(err => {
+        if (err) {
+            console.error('Error al cerrar sesión:', err);
+            res.status(500).send('Error al cerrar sesión.');
+        } else {
+            res.redirect('/login'); 
         }
-    })
-    
-    res.setHeader('Content-Type','application/json');
-    res.status(200).json({
-        message:"Logout exitoso"
     });
 });
 
-module.exports = usersRouter;
+
+module.exports = sessionRouter;
